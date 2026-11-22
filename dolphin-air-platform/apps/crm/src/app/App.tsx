@@ -10,6 +10,7 @@ import { UnauthorizedPage } from './UnauthorizedPage';
 import { ComingSoonPage } from '../features/dashboard/pages/ComingSoonPage';
 import { LeadsPage } from '../features/leads/pages/LeadsPage';
 import { OrganizationAccessPage } from '../features/auth/pages/OrganizationAccessPage';
+import { CustomersPage, ContactsPage } from '../features/customers/CustomersPage';
 
 export default function App() {
   return (
@@ -26,6 +27,13 @@ export default function App() {
               <Route path="/coming-soon/:module" element={<ComingSoonPage />} />
               <Route element={<ProtectedRoute permissions={['leads.read']} />}>
                 <Route path="/leads" element={<LeadsPage />} />
+              </Route>
+              <Route element={<ProtectedRoute permissions={['customers.read']} />}>
+                <Route path="/customers" element={<CustomersPage />} />
+                <Route path="/customers/:id" element={<CustomersPage />} />
+              </Route>
+              <Route element={<ProtectedRoute permissions={['contacts.read']} />}>
+                <Route path="/contacts" element={<ContactsPage />} />
               </Route>
             </Route>
           </Route>

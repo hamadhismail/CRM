@@ -19,7 +19,7 @@ const lead = {
 };
 const detail = {
   ...lead, countryCode: '+91', phoneNumber: '9876543210', email: 'test@example.invalid', description: null,
-  updatedAt: '2026-01-02T00:00:00Z', archivedAt: null,
+  updatedAt: '2026-01-02T00:00:00Z', archivedAt: null, assignee: null,
   notes: [{ id: 'n1', body: 'Call next week', createdAt: '2026-01-02T00:00:00Z' }],
   events: [{ id: 'e1', eventType: 'created', occurredAt: '2026-01-01T00:00:00Z' }],
 };
@@ -66,7 +66,9 @@ describe('LeadsPage', () => {
   });
 
   it('creates a lead with validated form fields and reloads the list', async () => {
-    auth.apiFetch.mockResolvedValue(response(page([])));
+    auth.apiFetch.mockImplementation(async (path: string, init?: RequestInit) => path === '/api/leads/duplicates'
+      ? response({ matches: [], truncated: false }) : path === '/api/leads' && init?.method === 'POST'
+        ? response({ id: lead.id }) : response(page([])));
     render(<LeadsPage />);
     await screen.findByText('No leads available.');
     await userEvent.click(screen.getByRole('button', { name: /add lead/i }));
@@ -75,12 +77,36 @@ describe('LeadsPage', () => {
     await userEvent.type(screen.getByLabelText('Lead source'), 'Website');
     await userEvent.click(screen.getByRole('button', { name: 'Save lead' }));
     await waitFor(() => expect(auth.apiFetch).toHaveBeenCalledWith('/api/leads', expect.objectContaining({ method: 'POST' })));
+    expect(auth.apiFetch).toHaveBeenCalledWith('/api/leads/duplicates', expect.objectContaining({ method: 'POST' }));
     expect(await screen.findByText('No leads available.')).toBeInTheDocument();
+  });
+
+  it('warns about a same-organization match and allows an explicit repeat inquiry', async () => {
+    auth.apiFetch.mockImplementation(async (path: string, init?: RequestInit) => {
+      if (path === '/api/leads?state=active&take=25') return response(page([]));
+      if (path === '/api/leads/duplicates') return response({ matches: [{ id: lead.id, leadNumber: 'LD-MATCH', fullName: 'Existing Pilgrim', status: 'NEW', service: 'UMRAH', matchedBy: ['phone'], archived: false }], truncated: false });
+      if (path === '/api/leads' && init?.method === 'POST') return response({ id: 'repeat-lead' }, 201);
+      return response(page([]));
+    });
+    render(<LeadsPage />);
+    await screen.findByText('No leads available.');
+    await userEvent.click(screen.getByRole('button', { name: /add lead/i }));
+    await userEvent.type(screen.getByLabelText('Customer name'), 'Repeat Pilgrim');
+    await userEvent.type(screen.getByLabelText('Phone number'), '9876543210');
+    await userEvent.type(screen.getByLabelText('Lead source'), 'Website');
+    await userEvent.click(screen.getByRole('button', { name: 'Save lead' }));
+    expect(await screen.findByText('Possible matching leads')).toBeInTheDocument();
+    expect(screen.getByText(/Existing Pilgrim/)).toBeInTheDocument();
+    expect(auth.apiFetch).not.toHaveBeenCalledWith('/api/leads', expect.objectContaining({ method: 'POST' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Create repeat inquiry' }));
+    await waitFor(() => expect(auth.apiFetch).toHaveBeenCalledWith('/api/leads', expect.objectContaining({ method: 'POST' })));
+    expect(await screen.findByText('Lead created.')).toBeInTheDocument();
   });
 
   it('renders details and history, submits edits, and refreshes detail data', async () => {
     auth.apiFetch.mockImplementation(async (path: string) => path === `/api/leads/${lead.id}`
-      ? response(detail) : path.includes('?') ? response(page()) : response({}));
+      ? response(detail) : path === '/api/leads/duplicates' ? response({ matches: [], truncated: false })
+        : path.includes('?') ? response(page()) : response({ id: lead.id }));
     render(<LeadsPage />);
     await userEvent.click(await screen.findByRole('button', { name: 'View Test Pilgrim' }));
     expect(await screen.findByText('Call next week')).toBeInTheDocument();
@@ -90,6 +116,25 @@ describe('LeadsPage', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Save changes' }));
     await waitFor(() => expect(auth.apiFetch).toHaveBeenCalledWith(`/api/leads/${lead.id}`, expect.objectContaining({ method: 'PATCH' })));
     expect(await screen.findByRole('heading', { name: 'Test Pilgrim' })).toBeInTheDocument();
+  });
+
+  it('loads eligible staff, assigns and displays assignment history', async () => {
+    const staff = { membershipId: 'membership-sales', displayName: 'Synthetic Sales', email: 'sales@example.invalid' };
+    const history = [{ id: 'history-1', previousAssignee: null, assignee: { membershipId: staff.membershipId, displayName: staff.displayName }, actor: { membershipId: 'actor', displayName: 'Current User' }, assignedAt: '2026-01-03T00:00:00Z' }];
+    auth.apiFetch.mockImplementation(async (path: string, init?: RequestInit) => path === `/api/leads/${lead.id}`
+      ? response(detail) : path === '/api/leads/assignees' ? response([staff])
+        : path === `/api/leads/${lead.id}/assignment-history` ? response(history)
+          : path === `/api/leads/${lead.id}/assign` && init?.method === 'POST' ? response({ id: lead.id, assignedMembershipId: staff.membershipId })
+            : path.includes('?') ? response(page()) : response({}));
+    render(<LeadsPage />);
+    await userEvent.click(await screen.findByRole('button', { name: 'View Test Pilgrim' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Assign' }));
+    await userEvent.selectOptions(await screen.findByLabelText('Eligible staff'), staff.membershipId);
+    await userEvent.click(screen.getByRole('button', { name: 'Assign lead' }));
+    await waitFor(() => expect(auth.apiFetch).toHaveBeenCalledWith(`/api/leads/${lead.id}/assign`, expect.objectContaining({ method: 'POST' })));
+    await userEvent.click(await screen.findByRole('button', { name: 'Assign' }));
+    expect((await screen.findAllByText(/Synthetic Sales/)).length).toBeGreaterThan(0);
+    expect(screen.getByText(/by Current User/)).toBeInTheDocument();
   });
 
   it('sends status changes to the guarded status endpoint', async () => {
@@ -124,7 +169,9 @@ describe('LeadsPage', () => {
   });
 
   it('shows a server error without pretending a failed create succeeded', async () => {
-    auth.apiFetch.mockResolvedValueOnce(response(page([]))).mockResolvedValueOnce(response({}, 403));
+    auth.apiFetch.mockImplementation(async (path: string, init?: RequestInit) => path.includes('?')
+      ? response(page([])) : path === '/api/leads/duplicates' ? response({ matches: [], truncated: false })
+        : path === '/api/leads' && init?.method === 'POST' ? response({}, 403) : response({}));
     render(<LeadsPage />);
     await screen.findByText('No leads available.');
     await userEvent.click(screen.getByRole('button', { name: /add lead/i }));
@@ -132,7 +179,7 @@ describe('LeadsPage', () => {
     await userEvent.type(screen.getByLabelText('Phone number'), '9876543210');
     await userEvent.type(screen.getByLabelText('Lead source'), 'Website');
     await userEvent.click(screen.getByRole('button', { name: 'Save lead' }));
-    expect(await screen.findByRole('alert')).toHaveTextContent('Lead was not saved.');
+    expect(await screen.findByRole('alert')).toHaveTextContent('You do not have permission for this action.');
     expect(screen.getByRole('heading', { name: 'Add lead' })).toBeInTheDocument();
   });
 

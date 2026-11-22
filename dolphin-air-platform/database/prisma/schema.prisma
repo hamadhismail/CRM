@@ -89,6 +89,9 @@ model Organization {
 
   memberships OrganizationMembership[]
   leads       Lead[]
+  customers   Customer[]
+  customerActivities CustomerActivity[]
+  customerLeadLinks CustomerLeadLink[]
   departments Department[]
   branches    Branch[]
   roleAssignments UserRole[] @relation("UserRoleOrganizationType")
@@ -117,10 +120,20 @@ model OrganizationMembership {
   departmentPositions DepartmentMembership[]
   branchPositions    BranchMembership[]
   assignedLeads      Lead[]
+  leadAssignments    LeadAssignmentHistory[] @relation("LeadAssignee")
+  previousLeadAssignments LeadAssignmentHistory[] @relation("PreviousLeadAssignee")
+  recordedLeadAssignments LeadAssignmentHistory[] @relation("LeadAssignmentActor")
   createdLeads       Lead[] @relation("LeadCreator")
   updatedLeads       Lead[] @relation("LeadUpdater")
   authoredLeadNotes  LeadNote[]
   leadEvents         LeadEvent[]
+  ownedCustomers     Customer[] @relation("CustomerOwner")
+  createdCustomers   Customer[] @relation("CustomerCreator")
+  updatedCustomers   Customer[] @relation("CustomerUpdater")
+  createdCustomerContacts CustomerContact[] @relation("CustomerContactCreator")
+  updatedCustomerContacts CustomerContact[] @relation("CustomerContactUpdater")
+  customerActivities CustomerActivity[]
+  customerLeadLinks CustomerLeadLink[]
 
   // Stable membership identity supports composite tenant-scoped foreign keys.
   @@unique([id, organizationId])
@@ -329,6 +342,38 @@ enum LeadService {
   OTHER_TRAVEL
 }
 
+enum CustomerType {
+  INDIVIDUAL
+  BUSINESS
+}
+
+enum CustomerStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum CustomerContactMethod {
+  PHONE
+  EMAIL
+  WHATSAPP
+}
+
+enum CustomerActivityType {
+  CREATED
+  UPDATED
+  CONTACT_ADDED
+  CONTACT_UPDATED
+  LEAD_LINKED
+  LEAD_CONVERTED
+  ARCHIVED
+  RESTORED
+}
+
+enum CustomerLeadLinkType {
+  LINKED
+  CONVERTED
+}
+
 model Lead {
   id                   String       @id @default(uuid()) @db.Uuid
   organizationId       String       @map("organization_id") @db.Uuid
@@ -363,6 +408,8 @@ model Lead {
   updater              OrganizationMembership? @relation("LeadUpdater", fields: [updatedByMembershipId, organizationId], references: [id, organizationId], onDelete: Restrict)
   notes                LeadNote[]
   events               LeadEvent[]
+  assignmentHistory    LeadAssignmentHistory[]
+  customerLinks        CustomerLeadLink[]
 
   @@unique([id, organizationId])
   @@unique([organizationId, leadNumber])
@@ -404,4 +451,134 @@ model LeadEvent {
   @@index([leadId, occurredAt(sort: Desc)])
   @@index([organizationId, occurredAt(sort: Desc)])
   @@map("lead_events")
+}
+
+model LeadAssignmentHistory {
+  id                          String   @id @default(uuid()) @db.Uuid
+  leadId                      String   @map("lead_id") @db.Uuid
+  organizationId              String   @map("organization_id") @db.Uuid
+  previousAssignedMembershipId String? @map("previous_assigned_membership_id") @db.Uuid
+  assignedMembershipId        String   @map("assigned_membership_id") @db.Uuid
+  actorMembershipId           String   @map("actor_membership_id") @db.Uuid
+  assignedAt                  DateTime @default(now()) @map("assigned_at") @db.Timestamptz(3)
+
+  lead             Lead                   @relation(fields: [leadId, organizationId], references: [id, organizationId], onDelete: Restrict)
+  previousAssignee OrganizationMembership? @relation("PreviousLeadAssignee", fields: [previousAssignedMembershipId, organizationId], references: [id, organizationId], onDelete: Restrict)
+  assignee         OrganizationMembership @relation("LeadAssignee", fields: [assignedMembershipId, organizationId], references: [id, organizationId], onDelete: Restrict)
+  actor            OrganizationMembership @relation("LeadAssignmentActor", fields: [actorMembershipId, organizationId], references: [id, organizationId], onDelete: Restrict)
+
+  @@index([organizationId, leadId, assignedAt(sort: Desc)])
+  @@index([organizationId, assignedMembershipId, assignedAt(sort: Desc)])
+  @@map("lead_assignment_history")
+}
+
+model Customer {
+  id                    String         @id @default(uuid()) @db.Uuid
+  organizationId        String         @map("organization_id") @db.Uuid
+  customerNumber        String         @map("customer_number") @db.VarChar(32)
+  type                  CustomerType
+  displayName           String         @map("display_name") @db.VarChar(160)
+  legalName             String?        @map("legal_name") @db.VarChar(180)
+  primaryCountryCode    String?        @map("primary_country_code") @db.VarChar(8)
+  primaryPhone          String?        @map("primary_phone") @db.VarChar(32)
+  phoneNormalized       String?        @map("phone_normalized") @db.VarChar(32)
+  email                 String?        @db.VarChar(320)
+  emailNormalized       String?        @map("email_normalized") @db.VarChar(320)
+  preferredLanguage    String?        @map("preferred_language") @db.VarChar(32)
+  country               String?        @db.VarChar(80)
+  city                  String?        @db.VarChar(100)
+  status                CustomerStatus @default(ACTIVE)
+  ownerMembershipId     String         @map("owner_membership_id") @db.Uuid
+  createdByMembershipId String         @map("created_by_membership_id") @db.Uuid
+  updatedByMembershipId String?        @map("updated_by_membership_id") @db.Uuid
+  createdAt             DateTime       @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt             DateTime       @updatedAt @map("updated_at") @db.Timestamptz(3)
+  archivedAt            DateTime?      @map("archived_at") @db.Timestamptz(3)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  owner        OrganizationMembership @relation("CustomerOwner", fields: [ownerMembershipId, organizationId], references: [id, organizationId], onDelete: Restrict)
+  creator      OrganizationMembership @relation("CustomerCreator", fields: [createdByMembershipId, organizationId], references: [id, organizationId], onDelete: Restrict)
+  updater      OrganizationMembership? @relation("CustomerUpdater", fields: [updatedByMembershipId, organizationId], references: [id, organizationId], onDelete: Restrict)
+  contacts     CustomerContact[]
+  activities   CustomerActivity[]
+  leadLinks    CustomerLeadLink[]
+
+  @@unique([id, organizationId])
+  @@unique([organizationId, customerNumber])
+  @@index([organizationId, status, createdAt(sort: Desc)])
+  @@index([organizationId, type, status])
+  @@index([organizationId, ownerMembershipId, status])
+  @@index([organizationId, phoneNormalized])
+  @@index([organizationId, emailNormalized])
+  @@index([organizationId, displayName])
+  @@map("customers")
+}
+
+model CustomerContact {
+  id                    String                 @id @default(uuid()) @db.Uuid
+  organizationId        String                 @map("organization_id") @db.Uuid
+  customerId            String                 @map("customer_id") @db.Uuid
+  fullName              String                 @map("full_name") @db.VarChar(160)
+  designation           String?                @db.VarChar(120)
+  countryCode           String?                @map("country_code") @db.VarChar(8)
+  phoneNumber           String?                @map("phone_number") @db.VarChar(32)
+  phoneNormalized       String?                @map("phone_normalized") @db.VarChar(32)
+  email                 String?                @db.VarChar(320)
+  emailNormalized       String?                @map("email_normalized") @db.VarChar(320)
+  preferredMethod       CustomerContactMethod? @map("preferred_method")
+  isPrimary             Boolean                @default(false) @map("is_primary")
+  createdByMembershipId String                 @map("created_by_membership_id") @db.Uuid
+  updatedByMembershipId String?                @map("updated_by_membership_id") @db.Uuid
+  createdAt             DateTime               @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt             DateTime               @updatedAt @map("updated_at") @db.Timestamptz(3)
+  archivedAt            DateTime?              @map("archived_at") @db.Timestamptz(3)
+
+  customer Customer @relation(fields: [customerId, organizationId], references: [id, organizationId], onDelete: Restrict)
+  creator  OrganizationMembership @relation("CustomerContactCreator", fields: [createdByMembershipId, organizationId], references: [id, organizationId], onDelete: Restrict)
+  updater  OrganizationMembership? @relation("CustomerContactUpdater", fields: [updatedByMembershipId, organizationId], references: [id, organizationId], onDelete: Restrict)
+
+  @@unique([id, organizationId])
+  @@index([organizationId, customerId, archivedAt, fullName])
+  @@index([organizationId, phoneNormalized])
+  @@index([organizationId, emailNormalized])
+  @@map("customer_contacts")
+}
+
+model CustomerActivity {
+  id                String               @id @default(uuid()) @db.Uuid
+  organizationId    String               @map("organization_id") @db.Uuid
+  customerId        String               @map("customer_id") @db.Uuid
+  actorMembershipId String               @map("actor_membership_id") @db.Uuid
+  eventType         CustomerActivityType @map("event_type")
+  safeMetadata      Json?                @map("safe_metadata")
+  occurredAt        DateTime             @default(now()) @map("occurred_at") @db.Timestamptz(3)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  customer     Customer @relation(fields: [customerId, organizationId], references: [id, organizationId], onDelete: Restrict)
+  actor        OrganizationMembership @relation(fields: [actorMembershipId, organizationId], references: [id, organizationId], onDelete: Restrict)
+
+  @@index([organizationId, customerId, occurredAt(sort: Desc)])
+  @@index([organizationId, occurredAt(sort: Desc)])
+  @@map("customer_activities")
+}
+
+model CustomerLeadLink {
+  id                String               @id @default(uuid()) @db.Uuid
+  organizationId    String               @map("organization_id") @db.Uuid
+  customerId        String               @map("customer_id") @db.Uuid
+  leadId            String               @map("lead_id") @db.Uuid
+  actorMembershipId String               @map("actor_membership_id") @db.Uuid
+  linkType          CustomerLeadLinkType @map("link_type")
+  idempotencyKey    String               @map("idempotency_key") @db.VarChar(128)
+  linkedAt          DateTime             @default(now()) @map("linked_at") @db.Timestamptz(3)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  customer     Customer @relation(fields: [customerId, organizationId], references: [id, organizationId], onDelete: Restrict)
+  lead         Lead @relation(fields: [leadId, organizationId], references: [id, organizationId], onDelete: Restrict)
+  actor        OrganizationMembership @relation(fields: [actorMembershipId, organizationId], references: [id, organizationId], onDelete: Restrict)
+
+  @@unique([organizationId, leadId])
+  @@unique([organizationId, idempotencyKey])
+  @@index([organizationId, customerId, linkedAt(sort: Desc)])
+  @@map("customer_lead_links")
 }

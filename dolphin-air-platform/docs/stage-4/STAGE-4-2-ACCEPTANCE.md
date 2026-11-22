@@ -1,4 +1,4 @@
-# Stage 4.2 acceptance
+﻿# Stage 4.2 acceptance
 
 Decision: **PARTIALLY VERIFIED / BLOCKED**. Migration 0003 and least-privilege grants are applied; synthetic persistence and tenant-constraint checks passed. Guarded list/create/detail/edit/status/note/archive/restore routes exist, and the CRM Leads screen connects to the existing API contracts with active/archived filtering.
 
@@ -26,4 +26,13 @@ Real CRM browser tests remain **NOT RUN**. Playwright installation was blocked b
 
 The authenticated browser/API gate is now **verified locally for the implemented Leads workflows**: five real Microsoft Edge Playwright tests passed against Auth Emulator, NestJS, and isolated PostgreSQL. See `STAGE-4-2-TEST-RESULTS.md` for workflow and security evidence. This supersedes the browser-not-run statement above for those workflows. Database identity remains disabled by default.
 
-Stage 4.2 remains **PARTIALLY IMPLEMENTED / PARTIALLY VERIFIED**, not accepted as a complete stage. Assignment workflow, duplicate handling, conversion and other deferred Stage 4.2 capabilities remain incomplete; broader acceptance criteria have not been met. Do not proceed to Stage 4.3 based on this partial scope.
+Historical checkpoint before Stage 4.2.13: assignment and duplicate handling were incomplete. The Stage 4.2.13 update below supersedes that implementation status; Stage 4.2 remains partial because conversion is contract-only and broader later-stage records/workflows are intentionally outside this scope.
+
+## Stage 4.2.13 acceptance update (2026-11-22)
+
+Assignment/reassignment, assignment history, organization-scoped duplicate detection, advisory repeat-inquiry warning, and conversion contracts/preparation are implemented. Evidence: real local Edge E2E **5/5**, authenticated local API/PostgreSQL integration **2/2**, CRM component tests **16/16**. Additive migration 0004 is applied and migration status is up to date; append-only runtime assignment-history privileges are verified. Existing role catalog and default authentication configuration are preserved.
+
+**Decision: Stage 4.2.13 verified locally; Stage 4.2 remains PARTIALLY VERIFIED / NOT FULLY ACCEPTED.** Actual Lead-to-Customer and Lead-to-Opportunity conversion are not implemented because their target models/workflows belong to subsequent stages, and production/default identity auth remains disabled. The ordinary test command failed before API test discovery with this execution host's `uv_os_get_passwd ENOMEM`; a disclosed temporary test-runner-only shim made the workspace suite pass and was removed afterward. Final validation passed: Prisma validation/client generation, database health, migration status (4/4 up to date), lint (10/10 tasks), typecheck (10/10 tasks), build (4/4 applications), CRM component tests (16/16), authenticated API/PostgreSQL integration (2/2), and real Edge E2E (5/5).
+
+Cleanup verification: zero Stage 3.3.4 synthetic database users, browser leads, or Auth Emulator users remained; Playwright traces/screenshots and the fixture file were removed. The project/default authentication flag was not changed.
+

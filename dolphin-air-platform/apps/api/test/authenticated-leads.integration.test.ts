@@ -32,11 +32,14 @@ test('verified local Firebase staff identity accesses only its organization Lead
   const migrator = new Pool({ connectionString: process.env.MIGRATION_DATABASE_URL, max: 1 });
   const fixture = {
     org: randomUUID(), secondOrg: randomUUID(), otherOrg: randomUUID(), actor: randomUUID(), staff: randomUUID(), otherStaff: randomUUID(),
-    disabledStaff: randomUUID(), noOrgStaff: randomUUID(),
-    membership: randomUUID(), secondMembership: randomUUID(), otherMembership: randomUUID(), otherLead: randomUUID(),
+    disabledStaff: randomUUID(), noOrgStaff: randomUUID(), assigneeStaff: randomUUID(), inactiveAssigneeStaff: randomUUID(),
+    noPermissionStaff: randomUUID(), restrictedActor: randomUUID(),
+    membership: randomUUID(), secondMembership: randomUUID(), otherMembership: randomUUID(), assigneeMembership: randomUUID(),
+    inactiveAssigneeMembership: randomUUID(), noPermissionMembership: randomUUID(), restrictedMembership: randomUUID(), otherLead: randomUUID(),
     firebaseUid: `stage333-${randomUUID()}`, otherFirebaseUid: `stage333-other-${randomUUID()}`,
     disabledFirebaseUid: `stage333-disabled-${randomUUID()}`, noOrgFirebaseUid: `stage333-no-org-${randomUUID()}`,
     unprovisionedFirebaseUid: `stage333-unprovisioned-${randomUUID()}`,
+    restrictedFirebaseUid: `stage333-restricted-${randomUUID()}`,
   };
   const email = `${fixture.firebaseUid}@dolphin-air.test`;
   const password = `Local-E2E-${randomUUID()}-Only`;
@@ -48,6 +51,8 @@ test('verified local Firebase staff identity accesses only its organization Lead
   const noOrgPassword = `Local-E2E-${randomUUID()}-Only`;
   const unprovisionedEmail = `${fixture.unprovisionedFirebaseUid}@dolphin-air.test`;
   const unprovisionedPassword = `Local-E2E-${randomUUID()}-Only`;
+  const restrictedEmail = `${fixture.restrictedFirebaseUid}@dolphin-air.test`;
+  const restrictedPassword = `Local-E2E-${randomUUID()}-Only`;
   const firebaseApp = getApps().find((app) => app.name === 'dolphin-air-local')
     ?? initializeApp({ projectId: 'dolphin-air-local' }, 'dolphin-air-local');
   const firebaseAuth = getAuth(firebaseApp);
@@ -76,12 +81,16 @@ test('verified local Firebase staff identity accesses only its organization Lead
     const role = roleResult.rows[0]!;
     assert.equal(role.allowed_organization_type, 'INTERNAL');
     assert.ok(role.permissions.includes('leads.read') && role.permissions.includes('leads.create') && role.permissions.includes('leads.update'));
+    const staffRoleResult = await migrator.query<{ id: string; scope: string }>('SELECT id,scope FROM roles WHERE code=$1', ['staff']);
+    assert.equal(staffRoleResult.rowCount, 1, 'the existing staff role must be provisioned');
+    const staffRole = staffRoleResult.rows[0]!;
 
     await firebaseAuth.createUser({ uid: fixture.firebaseUid, email, password, emailVerified: true, displayName: 'Synthetic Leads E2E Staff' });
     await firebaseAuth.createUser({ uid: fixture.otherFirebaseUid, email: otherEmail, password: otherPassword, emailVerified: true, displayName: 'Synthetic Other Organization Staff' });
     await firebaseAuth.createUser({ uid: fixture.disabledFirebaseUid, email: disabledEmail, password: disabledPassword, emailVerified: true, displayName: 'Synthetic Disabled Database Staff' });
     await firebaseAuth.createUser({ uid: fixture.noOrgFirebaseUid, email: noOrgEmail, password: noOrgPassword, emailVerified: true, displayName: 'Synthetic No Organization Staff' });
     await firebaseAuth.createUser({ uid: fixture.unprovisionedFirebaseUid, email: unprovisionedEmail, password: unprovisionedPassword, emailVerified: true, displayName: 'Synthetic Unprovisioned Staff' });
+    await firebaseAuth.createUser({ uid: fixture.restrictedFirebaseUid, email: restrictedEmail, password: restrictedPassword, emailVerified: true, displayName: 'Synthetic Restricted Staff' });
 
     const setup = await migrator.connect();
     try {
@@ -104,9 +113,24 @@ test('verified local Firebase staff identity accesses only its organization Lead
           fixture.disabledStaff, fixture.disabledFirebaseUid, fixture.noOrgStaff, fixture.noOrgFirebaseUid],
       );
       await setup.query(
+        `INSERT INTO users (id,firebase_uid,display_name,email,email_normalized,status,user_type,disabled_at,updated_at) VALUES
+          ($1,NULL,'Synthetic Eligible Assignee',NULL,NULL,'ACTIVE','INTERNAL_STAFF',NULL,now()),
+          ($2,NULL,'Synthetic Inactive Assignee',NULL,NULL,'DISABLED','INTERNAL_STAFF',now(),now()),
+          ($3,NULL,'Synthetic No Lead Permission',NULL,NULL,'ACTIVE','INTERNAL_STAFF',NULL,now()),
+          ($4,$5,'Synthetic Restricted Assignment Actor',$6,$6,'ACTIVE','INTERNAL_STAFF',NULL,now())`,
+        [fixture.assigneeStaff, fixture.inactiveAssigneeStaff, fixture.noPermissionStaff, fixture.restrictedActor, fixture.restrictedFirebaseUid, restrictedEmail],
+      );
+      await setup.query(
         `INSERT INTO organization_memberships (id,organization_id,user_id,status,joined_at,updated_at) VALUES
           ($1,$3,$6,'ACTIVE',now(),now()),($2,$4,$6,'ACTIVE',now(),now()),($5,$7,$8,'ACTIVE',now(),now())`,
         [fixture.membership, fixture.secondMembership, fixture.org, fixture.secondOrg, fixture.otherMembership, fixture.staff, fixture.otherOrg, fixture.otherStaff],
+      );
+      await setup.query(
+        `INSERT INTO organization_memberships (id,organization_id,user_id,status,joined_at,updated_at) VALUES
+          ($1,$5,$6,'ACTIVE',now(),now()),($2,$5,$7,'ACTIVE',now(),now()),
+          ($3,$5,$8,'ACTIVE',now(),now()),($4,$5,$9,'ACTIVE',now(),now())`,
+        [fixture.assigneeMembership, fixture.inactiveAssigneeMembership, fixture.noPermissionMembership, fixture.restrictedMembership,
+          fixture.org, fixture.assigneeStaff, fixture.inactiveAssigneeStaff, fixture.noPermissionStaff, fixture.restrictedActor],
       );
       await setup.query(
         `INSERT INTO user_roles (id,organization_id,organization_type,membership_id,role_id,role_scope,status,assigned_by_id) VALUES
@@ -115,6 +139,14 @@ test('verified local Firebase staff identity accesses only its organization Lead
         [randomUUID(), fixture.org, fixture.membership, role.id, role.scope, fixture.actor,
           randomUUID(), fixture.otherOrg, fixture.otherMembership,
           randomUUID(), fixture.secondOrg, fixture.secondMembership],
+      );
+      await setup.query(
+        `INSERT INTO user_roles (id,organization_id,organization_type,membership_id,role_id,role_scope,status,assigned_by_id) VALUES
+          ($1,$2,'INTERNAL',$3,$4,$5,'ACTIVE',$6),($7,$2,'INTERNAL',$8,$9,$10,'ACTIVE',$6),
+          ($11,$2,'INTERNAL',$12,$9,$10,'ACTIVE',$6)`,
+        [randomUUID(), fixture.org, fixture.assigneeMembership, role.id, role.scope, fixture.actor,
+          randomUUID(), fixture.noPermissionMembership, staffRole.id, staffRole.scope,
+          randomUUID(), fixture.restrictedMembership],
       );
       await setup.query(
         `INSERT INTO leads (id,organization_id,lead_number,full_name,country_code,phone_number,phone_normalized,source,service,created_by_membership_id,updated_at)
@@ -192,11 +224,84 @@ test('verified local Firebase staff identity accesses only its organization Lead
 
     const createResponse = await fetch(`${baseUrl}/api/leads`, {
       method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ fullName: 'Synthetic E2E Lead', countryCode: '+91', phoneNumber: '9876501234', source: 'Local E2E', service: 'UMRAH' }),
+      body: JSON.stringify({ fullName: 'Synthetic E2E Lead', countryCode: '+91', phoneNumber: '9876501234', email: 'repeat@example.invalid', source: 'Local E2E', service: 'UMRAH' }),
     });
     assert.equal(createResponse.status, 201);
     const createdLead = await createResponse.json() as { id: string; leadNumber: string };
     assert.match(createdLead.leadNumber, /^LD-/);
+
+    const duplicateMatchesResponse = await fetch(`${baseUrl}/api/leads/duplicates`, {
+      method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ countryCode: '+91', phoneNumber: '9876501234', email: 'REPEAT@example.invalid' }),
+    });
+    assert.equal(duplicateMatchesResponse.status, 201);
+    const duplicateMatches = await duplicateMatchesResponse.json() as { matches: Array<{ id: string; matchedBy: string[] }>; truncated: boolean };
+    assert.equal(duplicateMatches.matches.length, 1);
+    assert.equal(duplicateMatches.matches[0]?.id, createdLead.id);
+    assert.deepEqual(duplicateMatches.matches[0]?.matchedBy.sort(), ['email', 'phone']);
+    assert.equal(duplicateMatches.truncated, false);
+    const foreignDuplicate = await fetch(`${baseUrl}/api/leads/duplicates`, {
+      method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ countryCode: '+91', phoneNumber: '9000000000' }),
+    });
+    assert.equal(foreignDuplicate.status, 201);
+    assert.deepEqual((await foreignDuplicate.json() as { matches: unknown[] }).matches, [], 'duplicate results must not leak another organization records');
+
+    const assigneeListResponse = await fetch(`${baseUrl}/api/leads/assignees`, { headers });
+    assert.equal(assigneeListResponse.status, 200);
+    const assignees = await assigneeListResponse.json() as Array<{ membershipId: string; displayName: string }>;
+    assert.ok(assignees.some((candidate) => candidate.membershipId === fixture.assigneeMembership));
+    assert.ok(!assignees.some((candidate) => [fixture.inactiveAssigneeMembership, fixture.noPermissionMembership, fixture.otherMembership].includes(candidate.membershipId as never)));
+
+    const assignment = await fetch(`${baseUrl}/api/leads/${createdLead.id}/assign`, {
+      method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ membershipId: fixture.assigneeMembership }),
+    });
+    assert.equal(assignment.status, 201);
+    assert.equal((await assignment.json() as { assignedMembershipId: string }).assignedMembershipId, fixture.assigneeMembership);
+    const assignmentHistoryResponse = await fetch(`${baseUrl}/api/leads/${createdLead.id}/assignment-history`, { headers });
+    assert.equal(assignmentHistoryResponse.status, 200);
+    const assignmentHistory = await assignmentHistoryResponse.json() as Array<{ previousAssignee: unknown; assignee: { membershipId: string }; actor: { membershipId: string } }>;
+    assert.equal(assignmentHistory.length, 1);
+    assert.equal(assignmentHistory[0]?.previousAssignee, null);
+    assert.equal(assignmentHistory[0]?.assignee.membershipId, fixture.assigneeMembership);
+    assert.equal(assignmentHistory[0]?.actor.membershipId, fixture.membership);
+
+    const reassignment = await fetch(`${baseUrl}/api/leads/${createdLead.id}/assign`, {
+      method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ membershipId: fixture.membership }),
+    });
+    assert.equal(reassignment.status, 201);
+    const reassignmentHistory = await fetch(`${baseUrl}/api/leads/${createdLead.id}/assignment-history`, { headers });
+    const reassignmentEntries = await reassignmentHistory.json() as Array<{ previousAssignee: { membershipId: string } | null }>;
+    assert.equal(reassignmentEntries.length, 2);
+    assert.equal(reassignmentEntries[0]?.previousAssignee?.membershipId, fixture.assigneeMembership);
+
+    for (const ineligibleMembership of [fixture.inactiveAssigneeMembership, fixture.noPermissionMembership, fixture.otherMembership]) {
+      const deniedAssignment = await fetch(`${baseUrl}/api/leads/${createdLead.id}/assign`, {
+        method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ membershipId: ineligibleMembership }),
+      });
+      assert.equal(deniedAssignment.status, 403);
+    }
+    const restrictedToken = await signInAtEmulator(fixture.restrictedFirebaseUid, restrictedEmail, restrictedPassword);
+    const restrictedAssignment = await fetch(`${baseUrl}/api/leads/${createdLead.id}/assign`, {
+      method: 'POST', headers: { Authorization: `Bearer ${restrictedToken}`, 'X-Organization-Id': fixture.org, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ membershipId: fixture.assigneeMembership }),
+    });
+    assert.equal(restrictedAssignment.status, 403, 'assignment requires the existing leads.update permission');
+
+    await assert.rejects(migrator.query(
+      `INSERT INTO lead_assignment_history (id,lead_id,organization_id,previous_assigned_membership_id,assigned_membership_id,actor_membership_id)
+       VALUES ($1,$2,$3,NULL,$4,$5)`,
+      [randomUUID(), createdLead.id, fixture.org, fixture.otherMembership, fixture.membership],
+    ), (error: unknown) => Boolean(error && typeof error === 'object' && 'code' in error && error.code === '23503'));
+
+    const repeatInquiry = await fetch(`${baseUrl}/api/leads`, {
+      method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fullName: 'Synthetic Legitimate Repeat', countryCode: '+91', phoneNumber: '9876501234', email: 'repeat@example.invalid', source: 'Local E2E Repeat', service: 'UMRAH' }),
+    });
+    assert.equal(repeatInquiry.status, 201, 'duplicate detection is advisory and repeat inquiries remain permitted by leads.create');
 
     const detailResponse = await fetch(`${baseUrl}/api/leads/${createdLead.id}`, { headers });
     assert.equal(detailResponse.status, 200);
@@ -228,6 +333,162 @@ test('verified local Firebase staff identity accesses only its organization Lead
     const activeList = await fetch(`${baseUrl}/api/leads?state=active`, { headers });
     assert.ok((await activeList.json() as { items: Array<{ id: string }> }).items.some((item) => item.id === createdLead.id));
 
+    const noCustomerToken = await fetch(`${baseUrl}/api/customers/summary`);
+    assert.equal(noCustomerToken.status, 401, 'customer endpoints require Firebase authentication');
+    const customersSummary = await fetch(`${baseUrl}/api/customers/summary`, { headers });
+    assert.equal(customersSummary.status, 200);
+    const customerCreate = await fetch(`${baseUrl}/api/customers`, {
+      method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'INDIVIDUAL', displayName: 'Synthetic E2E Customer', primaryCountryCode: '+91', primaryPhone: '9765432111', email: 'customer@example.invalid' }),
+    });
+    assert.equal(customerCreate.status, 201);
+    const createdCustomer = await customerCreate.json() as { id: string; customerNumber: string };
+    assert.match(createdCustomer.customerNumber, /^CU-/);
+    const phoneDuplicate = await fetch(`${baseUrl}/api/customers/duplicates`, {
+      method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ countryCode: '+91', phoneNumber: '9765432111' }),
+    });
+    assert.equal(phoneDuplicate.status, 201);
+    assert.equal((await phoneDuplicate.json() as { matches: Array<{ id: string; matchedBy: string[] }> }).matches[0]?.matchedBy[0], 'phone');
+    const createdActivity = await fetch(`${baseUrl}/api/customers/${createdCustomer.id}/activities`, { headers });
+    assert.equal(createdActivity.status, 200);
+    assert.equal((await createdActivity.json() as Array<{ eventType: string }>)[0]?.eventType, 'CREATED');
+    const customerContact = await fetch(`${baseUrl}/api/customers/${createdCustomer.id}/contacts`, {
+      method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fullName: 'Synthetic E2E Contact', email: 'contact@example.invalid', isPrimary: true }),
+    });
+    assert.equal(customerContact.status, 201);
+    const contactId = (await customerContact.json() as { id: string }).id;
+    const contacts = await fetch(`${baseUrl}/api/customers/${createdCustomer.id}/contacts`, { headers });
+    assert.equal(contacts.status, 200);
+    assert.equal((await contacts.json() as Array<{ fullName: string; isPrimary: boolean }>)[0]?.fullName, 'Synthetic E2E Contact');
+    const contactUpdate = await fetch(`${baseUrl}/api/customers/${createdCustomer.id}/contacts/${contactId}`, {
+      method: 'PATCH', headers: { ...headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fullName: 'Synthetic E2E Contact Updated', email: 'contact@example.invalid', isPrimary: true }),
+    });
+    assert.equal(contactUpdate.status, 200);
+    const contactUpdateHistory = await fetch(`${baseUrl}/api/customers/${createdCustomer.id}/activities`, { headers });
+    const activityEvents = (await contactUpdateHistory.json() as Array<{ eventType: string }>).map(({ eventType }) => eventType);
+    assert.ok(activityEvents.includes('CONTACT_ADDED') && activityEvents.includes('CONTACT_UPDATED'));
+    const customerDuplicate = await fetch(`${baseUrl}/api/customers/duplicates`, {
+      method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: 'CONTACT@example.invalid' }),
+    });
+    assert.equal(customerDuplicate.status, 201);
+    assert.equal((await customerDuplicate.json() as { matches: Array<{ id: string; matchedBy: string[] }> }).matches[0]?.id, createdCustomer.id);
+    const customerUpdate = await fetch(`${baseUrl}/api/customers/${createdCustomer.id}`, {
+      method: 'PATCH', headers: { ...headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ displayName: 'Synthetic E2E Customer Edited' }),
+    });
+    assert.equal(customerUpdate.status, 200);
+    const customerDetail = await fetch(`${baseUrl}/api/customers/${createdCustomer.id}`, { headers });
+    assert.equal(customerDetail.status, 200);
+    assert.equal((await customerDetail.json() as { displayName: string }).displayName, 'Synthetic E2E Customer Edited');
+
+    const foreignCustomerId = randomUUID();
+    await migrator.query(`INSERT INTO customers
+      (id,organization_id,customer_number,type,display_name,email,email_normalized,status,owner_membership_id,created_by_membership_id,updated_at)
+      VALUES ($1,$2,$3,'INDIVIDUAL','Synthetic Foreign Customer','foreign@example.invalid','foreign@example.invalid','ACTIVE',$4,$4,now())`,
+      [foreignCustomerId, fixture.otherOrg, `CU-${randomUUID().slice(0,20).toUpperCase()}`, fixture.otherMembership]);
+    const crossOrganizationCustomer = await fetch(`${baseUrl}/api/customers/${foreignCustomerId}`, { headers });
+    assert.equal(crossOrganizationCustomer.status, 404, 'customer profile must be hidden across organizations');
+    const crossOrganizationUpdate = await fetch(`${baseUrl}/api/customers/${foreignCustomerId}`, {
+      method: 'PATCH', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify({ displayName: 'Unauthorized cross-organization update' }),
+    });
+    assert.equal(crossOrganizationUpdate.status, 404, 'customer update must remain organization scoped');
+    const crossOrganizationContact = await fetch(`${baseUrl}/api/customers/${foreignCustomerId}/contacts`, {
+      method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify({ fullName: 'Synthetic Unauthorized Contact', email: 'unauthorized@example.invalid' }),
+    });
+    assert.equal(crossOrganizationContact.status, 404, 'contact writes cannot cross customer organization scope');
+    const crossOrgDuplicate = await fetch(`${baseUrl}/api/customers/duplicates`, {
+      method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify({ email: 'foreign@example.invalid' }),
+    });
+    assert.equal(crossOrgDuplicate.status, 201);
+    assert.deepEqual((await crossOrgDuplicate.json() as { matches: unknown[] }).matches, []);
+
+    const archiveCustomer = await fetch(`${baseUrl}/api/customers/${createdCustomer.id}/archive`, { method: 'POST', headers });
+    assert.equal(archiveCustomer.status, 403, 'sales users cannot use administrator-only customer archive access');
+    const restoreCustomer = await fetch(`${baseUrl}/api/customers/${createdCustomer.id}/restore`, { method: 'POST', headers });
+    assert.equal(restoreCustomer.status, 403, 'sales users cannot use administrator-only customer restore access');
+
+    const markWon = await fetch(`${baseUrl}/api/leads/${createdLead.id}/status`, {
+      method: 'PATCH', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'WON' }),
+    });
+    assert.equal(markWon.status, 200);
+    const conversionPreview = await fetch(`${baseUrl}/api/customers/lead-conversion/${createdLead.id}`, { headers });
+    assert.equal(conversionPreview.status, 200);
+    assert.equal((await conversionPreview.json() as { eligible: boolean }).eligible, true);
+    const conversionKey = `e2e-${randomUUID()}`;
+    const converted = await fetch(`${baseUrl}/api/customers/convert-lead/${createdLead.id}`, {
+      method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode: 'CREATE', idempotencyKey: conversionKey }),
+    });
+    assert.equal(converted.status, 201);
+    const convertedCustomer = await converted.json() as { customerId: string; replayed: boolean };
+    assert.equal(convertedCustomer.replayed, false);
+    const retryConversion = await fetch(`${baseUrl}/api/customers/convert-lead/${createdLead.id}`, {
+      method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode: 'CREATE', idempotencyKey: conversionKey }),
+    });
+    assert.equal(retryConversion.status, 201);
+    assert.equal((await retryConversion.json() as { customerId: string; replayed: boolean }).replayed, true);
+    const linkedLeadHistory = await fetch(`${baseUrl}/api/customers/${convertedCustomer.customerId}/leads`, { headers });
+    assert.equal(linkedLeadHistory.status, 200);
+    assert.equal((await linkedLeadHistory.json() as Array<{ id: string }>)[0]?.id, createdLead.id);
+    const conversionActivityResponse = await fetch(`${baseUrl}/api/customers/${convertedCustomer.customerId}/activities`, { headers });
+    const conversionActivityTypes = (await conversionActivityResponse.json() as Array<{ eventType: string }>).map(({ eventType }) => eventType);
+    assert.ok(conversionActivityTypes.includes('LEAD_CONVERTED'));
+
+    const createWonLead = async (name: string, phone: string, email: string) => {
+      const response = await fetch(`${baseUrl}/api/leads`, {
+        method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fullName: name, countryCode: '+91', phoneNumber: phone, email, source: 'Synthetic conversion test', service: 'UMRAH' }),
+      });
+      assert.equal(response.status, 201);
+      const lead = await response.json() as { id: string };
+      for (const status of ['CONTACTED', 'QUALIFIED', 'WON']) {
+        const transition = await fetch(`${baseUrl}/api/leads/${lead.id}/status`, {
+          method: 'PATCH', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify({ status }),
+        });
+        assert.equal(transition.status, 200);
+      }
+      return lead.id;
+    };
+
+    const linkLeadId = await createWonLead('Synthetic Link Conversion Lead', '9765432101', 'link-conversion@example.invalid');
+    const crossOrganizationLink = await fetch(`${baseUrl}/api/customers/convert-lead/${linkLeadId}`, {
+      method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode: 'LINK', customerId: foreignCustomerId, idempotencyKey: `foreign-link-${randomUUID()}` }),
+    });
+    assert.equal(crossOrganizationLink.status, 404, 'Lead conversion must reject customers from another organization');
+    const linkedCustomerResult = await fetch(`${baseUrl}/api/customers/convert-lead/${linkLeadId}`, {
+      method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode: 'LINK', customerId: createdCustomer.id, idempotencyKey: `link-${randomUUID()}` }),
+    });
+    assert.equal(linkedCustomerResult.status, 201);
+    const linkedCustomerBody = await linkedCustomerResult.json() as { customerId: string; linkType: string; replayed: boolean };
+    assert.equal(linkedCustomerBody.customerId, createdCustomer.id);
+    assert.equal(linkedCustomerBody.linkType, 'LINKED');
+    assert.equal(linkedCustomerBody.replayed, false);
+    const linkActivityResponse = await fetch(`${baseUrl}/api/customers/${createdCustomer.id}/activities`, { headers });
+    assert.ok((await linkActivityResponse.json() as Array<{ eventType: string }>).some(({ eventType }) => eventType === 'LEAD_LINKED'));
+
+    const concurrentLeadId = await createWonLead('Synthetic Concurrent Conversion Lead', '9765432102', 'concurrent-conversion@example.invalid');
+    const concurrentConversions = await Promise.all([randomUUID(), randomUUID()].map((idempotencyKey) => fetch(`${baseUrl}/api/customers/convert-lead/${concurrentLeadId}`, {
+      method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode: 'CREATE', idempotencyKey: `concurrent-${idempotencyKey}` }),
+    })));
+    assert.deepEqual(concurrentConversions.map((response) => response.status), [201, 201]);
+    const concurrentResults = await Promise.all(concurrentConversions.map((response) => response.json() as Promise<{ customerId: string; replayed: boolean }>));
+    assert.equal(concurrentResults[0]?.customerId, concurrentResults[1]?.customerId);
+    const concurrentLinkCount = await migrator.query<{ count: number }>('SELECT count(*)::int AS count FROM customer_lead_links WHERE organization_id=$1 AND lead_id=$2', [fixture.org, concurrentLeadId]);
+    assert.equal(concurrentLinkCount.rows[0]?.count, 1);
+
+    const noCustomerPermission = await fetch(`${baseUrl}/api/customers`, {
+      headers: { Authorization: `Bearer ${restrictedToken}`, 'X-Organization-Id': fixture.org },
+    });
+    assert.equal(noCustomerPermission.status, 403, 'accounts without customer permission cannot list customer records');
+
     await migrator.query(`UPDATE organization_memberships SET status='REVOKED',revoked_at=now(),updated_at=now() WHERE id=$1`, [fixture.secondMembership]);
     const refreshedChoices = await fetch(`${baseUrl}/api/auth/organizations`, { headers: { Authorization: `Bearer ${token}` } });
     assert.equal(refreshedChoices.status, 200);
@@ -244,14 +505,24 @@ test('verified local Firebase staff identity accesses only its organization Lead
     await t.test('runtime operations were served by NestJS using the restricted database connection', async () => {
       const runtime = new Pool({ connectionString: process.env.DATABASE_URL, max: 1 });
       try {
-        const check = await runtime.query<{ database: string; role: string; address: string | null; auditUpdate: boolean }>(
+        const check = await runtime.query<{ database: string; role: string; address: string | null; auditUpdate: boolean; assignmentSelect: boolean; assignmentInsert: boolean; assignmentUpdate: boolean; assignmentDelete: boolean; assignmentTruncate: boolean }>(
           `SELECT current_database() AS database,current_user AS role,inet_server_addr()::text AS address,
-            has_table_privilege(current_user,'public.audit_events','UPDATE') AS "auditUpdate"`,
+            has_table_privilege(current_user,'public.audit_events','UPDATE') AS "auditUpdate",
+            has_table_privilege(current_user,'public.lead_assignment_history','SELECT') AS "assignmentSelect",
+            has_table_privilege(current_user,'public.lead_assignment_history','INSERT') AS "assignmentInsert",
+            has_table_privilege(current_user,'public.lead_assignment_history','UPDATE') AS "assignmentUpdate",
+            has_table_privilege(current_user,'public.lead_assignment_history','DELETE') AS "assignmentDelete",
+            has_table_privilege(current_user,'public.lead_assignment_history','TRUNCATE') AS "assignmentTruncate"`,
         );
         assert.equal(check.rows[0]?.database, 'dolphin_crm_dev');
         assert.equal(check.rows[0]?.role, 'dolphin_crm_dev_app');
         assert.match(check.rows[0]?.address ?? '', /^127\./);
         assert.equal(check.rows[0]?.auditUpdate, false);
+        assert.equal(check.rows[0]?.assignmentSelect, true);
+        assert.equal(check.rows[0]?.assignmentInsert, true);
+        assert.equal(check.rows[0]?.assignmentUpdate, false);
+        assert.equal(check.rows[0]?.assignmentDelete, false);
+        assert.equal(check.rows[0]?.assignmentTruncate, false);
       } finally { await runtime.end(); }
     });
   } finally {
@@ -267,12 +538,21 @@ test('verified local Firebase staff identity accesses only its organization Lead
       try {
         await cleanup.query('BEGIN');
         await cleanup.query('DELETE FROM lead_notes WHERE organization_id = ANY($1::uuid[])', [[fixture.org, fixture.secondOrg, fixture.otherOrg]]);
+        await cleanup.query('DELETE FROM lead_assignment_history WHERE organization_id = ANY($1::uuid[])', [[fixture.org, fixture.secondOrg, fixture.otherOrg]]);
         await cleanup.query('DELETE FROM lead_events WHERE organization_id = ANY($1::uuid[])', [[fixture.org, fixture.secondOrg, fixture.otherOrg]]);
+        await cleanup.query('DELETE FROM customer_lead_links WHERE organization_id = ANY($1::uuid[])', [[fixture.org, fixture.secondOrg, fixture.otherOrg]]);
+        await cleanup.query('DELETE FROM customer_activities WHERE organization_id = ANY($1::uuid[])', [[fixture.org, fixture.secondOrg, fixture.otherOrg]]);
+        await cleanup.query('DELETE FROM customer_contacts WHERE organization_id = ANY($1::uuid[])', [[fixture.org, fixture.secondOrg, fixture.otherOrg]]);
+        await cleanup.query('DELETE FROM customers WHERE organization_id = ANY($1::uuid[])', [[fixture.org, fixture.secondOrg, fixture.otherOrg]]);
         await cleanup.query('DELETE FROM leads WHERE organization_id = ANY($1::uuid[])', [[fixture.org, fixture.secondOrg, fixture.otherOrg]]);
-        await cleanup.query('DELETE FROM audit_events WHERE actor_user_id = ANY($1::uuid[])', [[fixture.actor, fixture.staff, fixture.otherStaff]]);
-        await cleanup.query('DELETE FROM user_roles WHERE membership_id = ANY($1::uuid[])', [[fixture.membership, fixture.secondMembership, fixture.otherMembership]]);
-        await cleanup.query('DELETE FROM organization_memberships WHERE id = ANY($1::uuid[])', [[fixture.membership, fixture.secondMembership, fixture.otherMembership]]);
-        await cleanup.query('DELETE FROM users WHERE id = ANY($1::uuid[])', [[fixture.actor, fixture.staff, fixture.otherStaff, fixture.disabledStaff, fixture.noOrgStaff]]);
+        await cleanup.query(
+          'DELETE FROM audit_events WHERE organization_id = ANY($1::uuid[]) OR actor_user_id = ANY($2::uuid[])',
+          [[fixture.org, fixture.secondOrg, fixture.otherOrg], [fixture.actor, fixture.staff, fixture.otherStaff, fixture.disabledStaff,
+            fixture.noOrgStaff, fixture.assigneeStaff, fixture.inactiveAssigneeStaff, fixture.noPermissionStaff, fixture.restrictedActor]],
+        );
+        await cleanup.query('DELETE FROM user_roles WHERE membership_id = ANY($1::uuid[])', [[fixture.membership, fixture.secondMembership, fixture.otherMembership, fixture.assigneeMembership, fixture.inactiveAssigneeMembership, fixture.noPermissionMembership, fixture.restrictedMembership]]);
+        await cleanup.query('DELETE FROM organization_memberships WHERE id = ANY($1::uuid[])', [[fixture.membership, fixture.secondMembership, fixture.otherMembership, fixture.assigneeMembership, fixture.inactiveAssigneeMembership, fixture.noPermissionMembership, fixture.restrictedMembership]]);
+        await cleanup.query('DELETE FROM users WHERE id = ANY($1::uuid[])', [[fixture.actor, fixture.staff, fixture.otherStaff, fixture.disabledStaff, fixture.noOrgStaff, fixture.assigneeStaff, fixture.inactiveAssigneeStaff, fixture.noPermissionStaff, fixture.restrictedActor]]);
         await cleanup.query('DELETE FROM organizations WHERE id = ANY($1::uuid[])', [[fixture.org, fixture.secondOrg, fixture.otherOrg]]);
         await cleanup.query('COMMIT');
       } catch (error) {
@@ -285,6 +565,7 @@ test('verified local Firebase staff identity accesses only its organization Lead
     await firebaseAuth.deleteUser(fixture.disabledFirebaseUid).catch(() => undefined);
     await firebaseAuth.deleteUser(fixture.noOrgFirebaseUid).catch(() => undefined);
     await firebaseAuth.deleteUser(fixture.unprovisionedFirebaseUid).catch(() => undefined);
+    await firebaseAuth.deleteUser(fixture.restrictedFirebaseUid).catch(() => undefined);
     await migrator.end();
     for (const [name, value] of oldEnv) {
       if (value === undefined) delete process.env[name];

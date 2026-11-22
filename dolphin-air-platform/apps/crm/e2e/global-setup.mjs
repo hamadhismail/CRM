@@ -87,11 +87,11 @@ function isApprovedUrl(value, expectedRole) {
 function makeFixture() {
   const suffix = randomUUID();
   const orgIds = Object.fromEntries(['multiA', 'multiB', 'single', 'foreign', 'restricted'].map((key) => [key, randomUUID()]));
-  const users = Object.fromEntries(['actor', 'multi', 'single', 'noMembership', 'disabled', 'unknown', 'foreign', 'restricted'].map((key) => [key, {
+  const users = Object.fromEntries(['actor', 'multi', 'single', 'noMembership', 'disabled', 'unknown', 'foreign', 'restricted', 'assignee', 'admin'].map((key) => [key, {
     id: randomUUID(), uid: `stage334-${key}-${suffix}`, email: `stage334-${key}-${suffix}@dolphin-air.test`,
     password: `E2E-Local-${randomUUID()}-Only`,
   }]));
-  const membershipIds = Object.fromEntries(['multiA', 'multiB', 'single', 'foreign', 'restricted'].map((key) => [key, randomUUID()]));
+  const membershipIds = Object.fromEntries(['multiA', 'multiB', 'single', 'foreign', 'restricted', 'assignee', 'admin'].map((key) => [key, randomUUID()]));
   return {
     orgIds, users, membershipIds, foreignLeadId: randomUUID(),
     orgNames: { multiA: `Synthetic E2E A ${suffix.slice(0, 8)}`, multiB: `Synthetic E2E B ${suffix.slice(0, 8)}`,
@@ -121,13 +121,15 @@ async function provisionDatabaseRows() {
     const rolesResult = await client.query(
       `SELECT r.id,r.code,r.scope,r.allowed_organization_type,array_agg(p.code) FILTER (WHERE p.code IS NOT NULL) AS permissions
        FROM roles r LEFT JOIN role_permissions rp ON rp.role_id=r.id LEFT JOIN permissions p ON p.id=rp.permission_id
-       WHERE r.code=ANY($1::varchar[]) GROUP BY r.id`, [['sales', 'staff']],
+       WHERE r.code=ANY($1::varchar[]) GROUP BY r.id`, [['sales', 'staff', 'admin']],
     );
     const sales = rolesResult.rows.find((role) => role.code === 'sales');
     const staff = rolesResult.rows.find((role) => role.code === 'staff');
-    assert.ok(sales && staff, 'Existing sales and staff roles must exist; E2E does not create roles.');
+    const admin = rolesResult.rows.find((role) => role.code === 'admin');
+    assert.ok(sales && staff && admin, 'Existing sales, staff and admin roles must exist; E2E does not create roles.');
     assert.equal(sales.allowed_organization_type, 'INTERNAL');
-    assert.ok(['leads.read', 'leads.create', 'leads.update', 'profile.read'].every((permission) => sales.permissions.includes(permission)));
+    assert.ok(['leads.read', 'leads.create', 'leads.update', 'customers.read', 'customers.create', 'customers.update', 'customers.convert', 'contacts.read', 'contacts.create', 'contacts.update', 'profile.read'].every((permission) => sales.permissions.includes(permission)));
+    assert.ok(['customers.read', 'customers.create', 'customers.update', 'customers.archive', 'customers.restore', 'contacts.read', 'contacts.create', 'contacts.update', 'profile.read'].every((permission) => admin.permissions.includes(permission)));
     assert.ok(staff.permissions.includes('profile.read') && !staff.permissions.some((permission) => permission.startsWith('leads.')));
 
     const organizations = Object.keys(fixture.orgIds).map((key) => [fixture.orgIds[key], fixture.orgNames[key]]);
@@ -143,25 +145,27 @@ async function provisionDatabaseRows() {
        ($7,$8,'Synthetic No Membership Staff',NULL,NULL,'ACTIVE','INTERNAL_STAFF',NULL,now()),
        ($9,$10,'Synthetic Disabled Database User',NULL,NULL,'DISABLED','INTERNAL_STAFF',now(),now()),
        ($11,$12,'Synthetic Foreign Organization Staff',NULL,NULL,'ACTIVE','INTERNAL_STAFF',NULL,now()),
-       ($13,$14,'Synthetic Restricted Role Staff',NULL,NULL,'ACTIVE','INTERNAL_STAFF',NULL,now())`,
+       ($13,$14,'Synthetic Restricted Role Staff',NULL,NULL,'ACTIVE','INTERNAL_STAFF',NULL,now()),
+       ($15,$16,'Synthetic Eligible E2E Assignee',NULL,NULL,'ACTIVE','INTERNAL_STAFF',NULL,now()),
+       ($17,$18,'Synthetic E2E Customer Admin',NULL,NULL,'ACTIVE','INTERNAL_STAFF',NULL,now())`,
       [u.actor.id,u.actor.uid,u.multi.id,u.multi.uid,u.single.id,u.single.uid,u.noMembership.id,u.noMembership.uid,
-        u.disabled.id,u.disabled.uid,u.foreign.id,u.foreign.uid,u.restricted.id,u.restricted.uid],
+        u.disabled.id,u.disabled.uid,u.foreign.id,u.foreign.uid,u.restricted.id,u.restricted.uid,u.assignee.id,u.assignee.uid,u.admin.id,u.admin.uid],
     );
     const pairs = [
-      ['multiA', 'multi'], ['multiB', 'multi'], ['single', 'single'], ['foreign', 'foreign'], ['restricted', 'restricted'],
+      ['multiA', 'multi'], ['multiB', 'multi'], ['single', 'single'], ['foreign', 'foreign'], ['restricted', 'restricted'], ['multiA', 'assignee', 'assignee'], ['multiA', 'admin', 'admin'],
     ];
-    for (const [orgKey, userKey] of pairs) {
+    for (const [orgKey, userKey, membershipKey = orgKey] of pairs) {
       await client.query(`INSERT INTO organization_memberships (id,organization_id,user_id,status,joined_at,updated_at)
-        VALUES ($1,$2,$3,'ACTIVE',now(),now())`, [fixture.membershipIds[orgKey], fixture.orgIds[orgKey], u[userKey].id]);
+        VALUES ($1,$2,$3,'ACTIVE',now(),now())`, [fixture.membershipIds[membershipKey], fixture.orgIds[orgKey], u[userKey].id]);
     }
     const assignments = [
-      ['multiA','sales'],['multiB','sales'],['single','sales'],['foreign','sales'],['restricted','staff'],
+      ['multiA','sales'],['multiB','sales'],['single','sales'],['foreign','sales'],['restricted','staff'],['multiA','sales','assignee'],['multiA','admin','admin'],
     ];
-    for (const [orgKey, roleCode] of assignments) {
-      const role = roleCode === 'sales' ? sales : staff;
+    for (const [orgKey, roleCode, membershipKey = orgKey] of assignments) {
+      const role = roleCode === 'sales' ? sales : roleCode === 'admin' ? admin : staff;
       await client.query(`INSERT INTO user_roles (id,organization_id,organization_type,membership_id,role_id,role_scope,status,assigned_by_id)
         VALUES ($1,$2,'INTERNAL',$3,$4,$5,'ACTIVE',$6)`,
-      [randomUUID(),fixture.orgIds[orgKey],fixture.membershipIds[orgKey],role.id,role.scope,u.actor.id]);
+      [randomUUID(),fixture.orgIds[orgKey],fixture.membershipIds[membershipKey],role.id,role.scope,u.actor.id]);
     }
     await client.query(
       `INSERT INTO leads (id,organization_id,lead_number,full_name,country_code,phone_number,phone_normalized,source,service,created_by_membership_id,updated_at)
@@ -242,7 +246,12 @@ async function cleanup({ preserveLog = false } = {}) {
         const userIds = Object.values(fixture.users).map((user) => user.id);
         const membershipIds = Object.values(fixture.membershipIds);
         await client.query(`DELETE FROM lead_notes WHERE organization_id=ANY($1::uuid[])`, [orgIds]);
+        await client.query(`DELETE FROM lead_assignment_history WHERE organization_id=ANY($1::uuid[])`, [orgIds]);
         await client.query(`DELETE FROM lead_events WHERE organization_id=ANY($1::uuid[])`, [orgIds]);
+        await client.query(`DELETE FROM customer_lead_links WHERE organization_id=ANY($1::uuid[])`, [orgIds]);
+        await client.query(`DELETE FROM customer_activities WHERE organization_id=ANY($1::uuid[])`, [orgIds]);
+        await client.query(`DELETE FROM customer_contacts WHERE organization_id=ANY($1::uuid[])`, [orgIds]);
+        await client.query(`DELETE FROM customers WHERE organization_id=ANY($1::uuid[])`, [orgIds]);
         await client.query(`DELETE FROM leads WHERE organization_id=ANY($1::uuid[])`, [orgIds]);
         await client.query(`DELETE FROM audit_events WHERE organization_id=ANY($1::uuid[]) OR actor_user_id=ANY($2::uuid[])`, [orgIds,userIds]);
         await client.query(`DELETE FROM user_roles WHERE membership_id=ANY($1::uuid[])`, [membershipIds]);

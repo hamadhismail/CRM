@@ -6,7 +6,7 @@
                     "build":  "nest build",
                     "lint":  "eslint .",
                     "typecheck":  "tsc --noEmit",
-                    "test":  "tsx --test test/identity-policy.test.ts test/auth-service.test.ts test/auth-only-emulator.test.ts test/auth-emulator.test.ts test/runtime-database-target.test.ts test/role-scope.policy.test.ts test/role-scope.database.test.ts test/database-identity-sync.test.ts test/leads-gate.test.ts test/authenticated-leads.integration.test.ts",
+                    "test":  "tsx --test test/identity-policy.test.ts test/auth-service.test.ts test/auth-only-emulator.test.ts test/auth-emulator.test.ts test/runtime-database-target.test.ts test/role-scope.policy.test.ts test/role-scope.database.test.ts test/database-identity-sync.test.ts test/leads-gate.test.ts test/authenticated-leads.integration.test.ts test/lead-conversion-contract.test.ts",
                     "db:health":  "node scripts/db-health.mjs",
                     "sync:role-catalog":  "tsx scripts/sync-role-catalog.ts",
                     "seed:identity":  "tsx scripts/seed-identity-emulator.ts"

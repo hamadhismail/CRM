@@ -2,7 +2,7 @@
   Activity as ActivityIcon, ArrowDownRight, ArrowRight, ArrowUpRight, CalendarDays, CheckCircle2, CircleAlert,
   Clock3, Handshake, Inbox, ListTodo, MessageSquareText, Plus, UserRoundPlus, Users,
 } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { LucideIcon } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../../../app/providers/AuthProvider';
@@ -24,16 +24,24 @@ const PERIOD_LABELS: Record<DashboardPeriod, string> = {
 };
 
 export function DashboardPage() {
-  const { user } = useAuth();
+  const { user, apiFetch } = useAuth();
+  const [customerMetric, setCustomerMetric] = useState<{ value: number | null; status: DashboardMetric['status']; context: string }>({ value: null, status: 'unavailable', context: 'Authorized data source not connected' });
   const [period, setPeriod] = useState<DashboardPeriod>('last7Days');
   const [customFrom, setCustomFrom] = useState('');
   const [customTo, setCustomTo] = useState('');
-  const metrics = useMemo<DashboardMetric[]>(() => METRIC_DEFINITIONS.map((metric) => ({
-    ...metric,
-    value: null,
-    status: 'unavailable' as const,
-    context: 'Authorized data source not connected',
-  })), []);
+  useEffect(() => {
+    if (!user?.permissions.includes('customers.read')) return;
+    let current = true;
+    void apiFetch('/api/customers/summary').then(async (response) => {
+      if (!response.ok) throw new Error('Customer summary unavailable');
+      return response.json() as Promise<{ active: number }>;
+    }).then((summary) => { if (current) setCustomerMetric({ value: summary.active, status: summary.active ? 'ready' : 'empty', context: 'Active customers in this organization' }); })
+      .catch(() => { if (current) setCustomerMetric({ value: null, status: 'unavailable', context: 'Authorized customer metrics unavailable' }); });
+    return () => { current = false; };
+  }, [apiFetch, user]);
+  const metrics = useMemo<DashboardMetric[]>(() => METRIC_DEFINITIONS.map((metric) => metric.id === 'activeCustomers'
+    ? { ...metric, ...customerMetric }
+    : { ...metric, value: null, status: 'unavailable' as const, context: 'Authorized data source not connected' }), [customerMetric]);
   const sectionTitle = user?.role === 'sales' ? 'Your sales workspace'
     : user?.role === 'operations' ? 'Your operations workspace'
       : user?.role === 'finance_accounts' ? 'Your finance workspace'
@@ -96,7 +104,7 @@ export function DashboardPage() {
         <div className="dashboard-section-heading"><div><p className="dashboard-eyebrow">Workspace</p><h3 id="quick-actions-heading">Quick actions</h3></div><span>Actions become available with their CRM modules</span></div>
         <div className="dashboard-action-list">
           <QuickAction label="Add lead" icon={Plus} available={Boolean(user?.permissions.includes('leads.create'))} />
-          <QuickAction label="Add customer" icon={UserRoundPlus} available={false} />
+          <QuickAction label="Add customer" icon={UserRoundPlus} available={Boolean(user?.permissions.includes('customers.create'))} to={user?.permissions.includes('customers.create') ? '/customers' : undefined} />
           <QuickAction label="Create inquiry" icon={Inbox} available={Boolean(user?.permissions.includes('inquiries.create'))} />
           <QuickAction label="Schedule follow-up" icon={CalendarDays} available={false} />
           <QuickAction label="Create task" icon={CheckCircle2} available={false} />
@@ -124,9 +132,10 @@ function DataPanel({ title, icon: Icon, emptyText, actionLabel, actionTo, wide =
   </article>;
 }
 
-function QuickAction({ label, icon: Icon, available }: { label: string; icon: LucideIcon; available: boolean }) {
-  return <button className="dashboard-quick-action" type="button" disabled title={available ? `${label} is not available until its module is implemented` : `${label} is unavailable for your permissions or its module is not implemented`}>
-    <span><Icon size={18} /></span><strong>{label}</strong><small>{available ? 'Coming soon' : 'Unavailable'}</small>
+function QuickAction({ label, icon: Icon, available, to }: { label: string; icon: LucideIcon; available: boolean; to?: string }) {
+  const content = <><span><Icon size={18} /></span><strong>{label}</strong><small>{available ? to ? 'Open customer directory' : 'Coming soon' : 'Unavailable'}</small></>;
+  return to ? <Link className="dashboard-quick-action" to={to}>{content}</Link> : <button className="dashboard-quick-action" type="button" disabled title={available ? `${label} is not available until its module is implemented` : `${label} is unavailable for your permissions or its module is not implemented`}>
+    {content}
   </button>;
 }
 

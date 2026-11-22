@@ -28,3 +28,18 @@
 .leads-page__fields label { display: flex; flex-direction: column; gap: 7px; color: #465562; font-size: 12px; font-weight: 620; }
 .leads-page__fields input, .leads-page__fields select { width: 100%; min-height: 40px; padding: 0 11px; border: 1px solid #D8D5CE; border-radius: 6px; color: var(--color-dark-text); background: #fff; font-size: 13px; }
 @media (max-width: 640px) { .leads-page__heading { align-items: flex-start; flex-direction: column; } .leads-page__fields { grid-template-columns: 1fr; } }
+.leads-page__success { margin: 0; padding: 11px 14px; border: 1px solid #B8D7C4; border-radius: 7px; color: #245739; background: #F2FAF5; font-size: 12px; }
+.leads-page__duplicate-warning { padding: 16px; border: 1px solid #E5BD54; border-radius: 9px; color: var(--color-dark-text); background: #FFFBEE; }
+.leads-page__duplicate-warning h3 { margin: 0 0 8px; font-size: 15px; }
+.leads-page__duplicate-warning p, .leads-page__duplicate-warning li { font-size: 12px; line-height: 1.6; }
+.leads-page__duplicate-warning ul { padding-left: 20px; }
+.leads-page__duplicate-warning button + button { margin-left: 8px; }
+.leads-page__conversion { margin: 18px 0; padding: 12px 0; border-top: 1px solid var(--color-border); color: var(--color-muted-text); font-size: 12px; }
+.leads-page__conversion summary { color: var(--color-dark-text); font-weight: 650; cursor: pointer; }
+.leads-page__conversion p { line-height: 1.6; }
+.leads-page__assignment-dialog { position: fixed; z-index: 80; top: 50%; left: 50%; width: min(540px, calc(100vw - 24px)); max-height: min(80vh, 720px); overflow: auto; transform: translate(-50%, -50%); padding: 22px; border: 1px solid var(--color-border); border-radius: 12px; background: #fff; box-shadow: 0 18px 70px rgba(6, 34, 56, .24); }
+.leads-page__assignment-dialog label { display: flex; flex-direction: column; gap: 7px; margin: 12px 0 18px; color: #465562; font-size: 12px; font-weight: 620; }
+.leads-page__assignment-dialog select { min-height: 40px; padding: 0 10px; border: 1px solid #D8D5CE; border-radius: 6px; background: #fff; color: var(--color-dark-text); }
+.leads-page__assignment-dialog h4 { margin: 22px 0 8px; font-size: 13px; }
+.leads-page__assignment-dialog li, .leads-page__assignment-dialog p { color: var(--color-muted-text); font-size: 12px; line-height: 1.6; }
+.leads-page__assignment-dialog button:focus-visible, .leads-page__assignment-dialog select:focus-visible { outline: 3px solid rgba(217,162,11,.5); outline-offset: 2px; }

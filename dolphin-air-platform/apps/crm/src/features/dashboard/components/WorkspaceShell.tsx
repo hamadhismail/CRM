@@ -27,8 +27,8 @@ const GROUPS: readonly WorkspaceGroup[] = [
   { label: 'Main', items: [
     { label: 'Dashboard', to: '/', permission: 'profile.read', icon: LayoutDashboard },
     { label: 'Leads', to: '/leads', permission: 'leads.read', icon: Users },
-    { label: 'Contacts', icon: ContactRound, comingSoon: true },
-    { label: 'Customers', icon: UserRound, comingSoon: true },
+    { label: 'Contacts', to: '/contacts', permission: 'contacts.read', icon: ContactRound },
+    { label: 'Customers', to: '/customers', permission: 'customers.read', icon: UserRound },
     { label: 'Inquiries', to: '/coming-soon/inquiries', permission: 'inquiries.read', icon: MessageSquareText },
     { label: 'Sales Pipeline', icon: ArrowDownUp, comingSoon: true },
   ] },
@@ -67,6 +67,8 @@ export function WorkspaceShell() {
   const pageTitle = location.pathname === '/'
     ? 'Dashboard'
     : location.pathname === '/leads' ? 'Leads'
+    : location.pathname.startsWith('/customers') ? 'Customers'
+    : location.pathname.startsWith('/contacts') ? 'Contacts'
     : location.pathname === '/staff' ? 'Staff Management'
       : location.pathname.startsWith('/coming-soon/')
         ? toTitle(location.pathname.split('/').at(-1) ?? 'Workspace') : 'Workspace';

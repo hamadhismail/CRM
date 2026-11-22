@@ -8,11 +8,12 @@ import { PermissionsModule } from './modules/permissions/permissions.module';
 import { OrganizationsModule } from './modules/organizations/organizations.module';
 import { DatabaseModule } from './database/database.module';
 import { LeadsModule } from './modules/leads/leads.module';
+import { CustomersModule } from './modules/customers/customers.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true, envFilePath: [resolve(process.cwd(), '.env'), resolve(process.cwd(), '../../.env')] }),
-    AuthModule, UsersModule, RolesModule, PermissionsModule, OrganizationsModule, DatabaseModule, LeadsModule,
+    AuthModule, UsersModule, RolesModule, PermissionsModule, OrganizationsModule, DatabaseModule, LeadsModule, CustomersModule,
   ],
 })
 export class AppModule {}
