@@ -1,0 +1,407 @@
+// Stage 3.2 identity foundation. Prisma ORM 7 schema; local connection URL is
+// loaded from the ignored environment file by the root Prisma config.
+
+generator client {
+  provider     = "prisma-client"
+  output       = "../../apps/api/src/generated/prisma"
+  moduleFormat = "cjs"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum UserStatus {
+  INVITED
+  ACTIVE
+  DISABLED
+}
+
+enum UserType {
+  INTERNAL_STAFF
+  AGENCY_USER
+  CUSTOMER
+}
+
+enum OrganizationType {
+  INTERNAL
+  B2B_AGENCY
+}
+
+enum OrganizationStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum MembershipStatus {
+  INVITED
+  ACTIVE
+  SUSPENDED
+  REVOKED
+}
+
+enum RoleScope {
+  SYSTEM
+  ORGANIZATION
+}
+
+enum UserRoleStatus {
+  ACTIVE
+  REVOKED
+}
+
+enum CustomerIdentityStatus {
+  PENDING_VERIFICATION
+  VERIFIED
+  DISABLED
+}
+
+model User {
+  id               String      @id @default(uuid()) @db.Uuid
+  firebaseUid      String?     @unique @map("firebase_uid") @db.VarChar(128)
+  displayName      String      @map("display_name") @db.VarChar(160)
+  email            String?     @db.VarChar(320)
+  emailNormalized  String?     @unique @map("email_normalized") @db.VarChar(320)
+  phoneNumber      String?     @map("phone_number") @db.VarChar(32)
+  status           UserStatus  @default(INVITED)
+  userType         UserType    @map("user_type")
+  createdAt        DateTime    @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt        DateTime    @updatedAt @map("updated_at") @db.Timestamptz(3)
+  disabledAt       DateTime?   @map("disabled_at") @db.Timestamptz(3)
+
+  memberships      OrganizationMembership[]
+  customerIdentity CustomerIdentity?
+  auditEvents      AuditEvent[] @relation("AuditActor")
+  roleAssignments  UserRole[]   @relation("RoleAssigner")
+
+  @@index([status, userType])
+  @@index([displayName])
+  @@map("users")
+}
+
+model Organization {
+  id          String             @id @default(uuid()) @db.Uuid
+  name        String             @db.VarChar(180)
+  type        OrganizationType
+  status      OrganizationStatus @default(ACTIVE)
+  createdAt   DateTime           @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime           @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  memberships OrganizationMembership[]
+  leads       Lead[]
+  departments Department[]
+  branches    Branch[]
+  roleAssignments UserRole[] @relation("UserRoleOrganizationType")
+  auditEvents AuditEvent[]
+
+  @@unique([id, type])
+  @@index([type, status])
+  @@index([name])
+  @@map("organizations")
+}
+
+model OrganizationMembership {
+  id             String           @id @default(uuid()) @db.Uuid
+  organizationId String           @map("organization_id") @db.Uuid
+  userId         String           @map("user_id") @db.Uuid
+  status         MembershipStatus @default(INVITED)
+  invitedAt      DateTime?        @map("invited_at") @db.Timestamptz(3)
+  joinedAt       DateTime?        @map("joined_at") @db.Timestamptz(3)
+  revokedAt      DateTime?        @map("revoked_at") @db.Timestamptz(3)
+  createdAt      DateTime         @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime         @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  organization        Organization       @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  user                User               @relation(fields: [userId], references: [id], onDelete: Restrict)
+  roleAssignments     UserRole[]
+  departmentPositions DepartmentMembership[]
+  branchPositions    BranchMembership[]
+  assignedLeads      Lead[]
+  createdLeads       Lead[] @relation("LeadCreator")
+  updatedLeads       Lead[] @relation("LeadUpdater")
+  authoredLeadNotes  LeadNote[]
+  leadEvents         LeadEvent[]
+
+  // Stable membership identity supports composite tenant-scoped foreign keys.
+  @@unique([id, organizationId])
+  // Revoke/reactivate the same membership row; don't create duplicate rows.
+  @@unique([organizationId, userId])
+  @@index([userId, status])
+  @@index([organizationId, status])
+  @@map("organization_memberships")
+}
+
+model Role {
+  id           String    @id @default(uuid()) @db.Uuid
+  code         String    @unique @db.VarChar(80)
+  name         String    @db.VarChar(120)
+  description  String?   @db.VarChar(500)
+  scope        RoleScope @default(ORGANIZATION)
+  allowedOrganizationType OrganizationType? @map("allowed_organization_type")
+  isSystemRole Boolean   @default(false) @map("is_system_role")
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt    DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  assignments UserRole[]
+  permissions RolePermission[]
+
+  @@unique([id, allowedOrganizationType, scope])
+  @@index([scope, isSystemRole])
+  @@map("roles")
+}
+
+model Permission {
+  id          String   @id @default(uuid()) @db.Uuid
+  code        String   @unique @db.VarChar(120)
+  description String?  @db.VarChar(500)
+  resource    String   @db.VarChar(80)
+  action      String   @db.VarChar(80)
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  roles RolePermission[]
+
+  @@unique([resource, action])
+  @@index([resource])
+  @@map("permissions")
+}
+
+model RolePermission {
+  roleId       String   @map("role_id") @db.Uuid
+  permissionId String   @map("permission_id") @db.Uuid
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Restrict)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Restrict)
+
+  @@id([roleId, permissionId])
+  @@index([permissionId])
+  @@map("role_permissions")
+}
+
+model UserRole {
+  id             String        @id @default(uuid()) @db.Uuid
+  organizationId String        @map("organization_id") @db.Uuid
+  organizationType OrganizationType @map("organization_type")
+  membershipId   String        @map("membership_id") @db.Uuid
+  roleId         String        @map("role_id") @db.Uuid
+  roleScope      RoleScope     @map("role_scope")
+  status         UserRoleStatus @default(ACTIVE)
+  assignedById   String?       @map("assigned_by_id") @db.Uuid
+  assignedAt     DateTime      @default(now()) @map("assigned_at") @db.Timestamptz(3)
+  revokedAt      DateTime?     @map("revoked_at") @db.Timestamptz(3)
+
+  membership OrganizationMembership @relation(fields: [membershipId, organizationId], references: [id, organizationId], onDelete: Restrict)
+  organization Organization @relation("UserRoleOrganizationType", fields: [organizationId, organizationType], references: [id, type], onDelete: Restrict, onUpdate: Restrict)
+  role       Role                   @relation(fields: [roleId, organizationType, roleScope], references: [id, allowedOrganizationType, scope], onDelete: Restrict, onUpdate: Restrict)
+  assignedBy User?                  @relation("RoleAssigner", fields: [assignedById], references: [id], onDelete: SetNull)
+
+  // A revoked assignment is reactivated in place; audit events retain history.
+  @@unique([membershipId, roleId])
+  @@index([organizationId, status])
+  @@index([roleId, status])
+  @@map("user_roles")
+}
+
+model Department {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  code           String   @db.VarChar(48)
+  name           String   @db.VarChar(120)
+  active         Boolean  @default(true)
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  organization Organization          @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  memberships  DepartmentMembership[]
+
+  @@unique([id, organizationId])
+  @@unique([organizationId, code])
+  @@unique([organizationId, name])
+  @@index([organizationId, active])
+  @@map("departments")
+}
+
+model Branch {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  code           String   @db.VarChar(48)
+  name           String   @db.VarChar(120)
+  active         Boolean  @default(true)
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  organization Organization       @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  memberships  BranchMembership[]
+
+  @@unique([id, organizationId])
+  @@unique([organizationId, code])
+  @@unique([organizationId, name])
+  @@index([organizationId, active])
+  @@map("branches")
+}
+
+model DepartmentMembership {
+  organizationId String @map("organization_id") @db.Uuid
+  membershipId   String @map("membership_id") @db.Uuid
+  departmentId   String @map("department_id") @db.Uuid
+
+  membership OrganizationMembership @relation(fields: [membershipId, organizationId], references: [id, organizationId], onDelete: Restrict)
+  department Department             @relation(fields: [departmentId, organizationId], references: [id, organizationId], onDelete: Restrict)
+
+  @@id([membershipId, departmentId])
+  @@index([organizationId, departmentId])
+  @@map("department_memberships")
+}
+
+model BranchMembership {
+  organizationId String @map("organization_id") @db.Uuid
+  membershipId   String @map("membership_id") @db.Uuid
+  branchId       String @map("branch_id") @db.Uuid
+
+  membership OrganizationMembership @relation(fields: [membershipId, organizationId], references: [id, organizationId], onDelete: Restrict)
+  branch     Branch                 @relation(fields: [branchId, organizationId], references: [id, organizationId], onDelete: Restrict)
+
+  @@id([membershipId, branchId])
+  @@index([organizationId, branchId])
+  @@map("branch_memberships")
+}
+
+model CustomerIdentity {
+  id                 String                 @id @default(uuid()) @db.Uuid
+  userId             String                 @unique @map("user_id") @db.Uuid
+  status             CustomerIdentityStatus @default(PENDING_VERIFICATION)
+  identityVerifiedAt DateTime?              @map("identity_verified_at") @db.Timestamptz(3)
+  createdAt          DateTime               @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt          DateTime               @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@index([status, identityVerifiedAt])
+  @@map("customer_identities")
+}
+
+model AuditEvent {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String?  @map("organization_id") @db.Uuid
+  actorUserId    String?  @map("actor_user_id") @db.Uuid
+  action         String   @db.VarChar(120)
+  targetType     String   @map("target_type") @db.VarChar(120)
+  targetId       String?  @map("target_id") @db.VarChar(160)
+  requestId      String?  @map("request_id") @db.VarChar(128)
+  safeMetadata   Json?    @map("safe_metadata")
+  eventTimestamp DateTime @default(now()) @map("event_timestamp") @db.Timestamptz(3)
+
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  actor        User?         @relation("AuditActor", fields: [actorUserId], references: [id], onDelete: Restrict)
+
+  @@index([organizationId, eventTimestamp(sort: Desc)])
+  @@index([actorUserId, eventTimestamp(sort: Desc)])
+  @@index([targetType, targetId, eventTimestamp(sort: Desc)])
+  @@index([requestId])
+  @@map("audit_events")
+}
+
+enum LeadStatus {
+  NEW
+  CONTACTED
+  QUALIFIED
+  PROPOSAL_PENDING
+  NEGOTIATION
+  WON
+  LOST
+}
+
+enum LeadPriority {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+}
+
+enum LeadService {
+  UMRAH
+  HAJJ
+  ZIYARATH
+  FLIGHT_TICKETS
+  HOTELS
+  VISA_ASSISTANCE
+  HOLIDAY_PACKAGES
+  OTHER_TRAVEL
+}
+
+model Lead {
+  id                   String       @id @default(uuid()) @db.Uuid
+  organizationId       String       @map("organization_id") @db.Uuid
+  leadNumber           String       @map("lead_number") @db.VarChar(32)
+  fullName             String       @map("full_name") @db.VarChar(160)
+  countryCode          String       @map("country_code") @db.VarChar(8)
+  phoneNumber          String       @map("phone_number") @db.VarChar(32)
+  phoneNormalized      String       @map("phone_normalized") @db.VarChar(32)
+  email                String?      @db.VarChar(320)
+  emailNormalized      String?      @map("email_normalized") @db.VarChar(320)
+  source               String       @db.VarChar(60)
+  service              LeadService
+  destination          String?      @db.VarChar(120)
+  departureDate        DateTime?    @map("departure_date") @db.Date
+  expectedPassengers   Int?         @map("expected_passengers")
+  budgetMinimum        Decimal?     @map("budget_minimum") @db.Decimal(14, 2)
+  budgetMaximum        Decimal?     @map("budget_maximum") @db.Decimal(14, 2)
+  currency             String       @default("INR") @db.VarChar(3)
+  assignedMembershipId String?      @map("assigned_membership_id") @db.Uuid
+  status               LeadStatus   @default(NEW)
+  priority             LeadPriority @default(NORMAL)
+  description          String?      @db.VarChar(2000)
+  createdByMembershipId String      @map("created_by_membership_id") @db.Uuid
+  updatedByMembershipId String?     @map("updated_by_membership_id") @db.Uuid
+  createdAt            DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt            DateTime     @updatedAt @map("updated_at") @db.Timestamptz(3)
+  archivedAt           DateTime?    @map("archived_at") @db.Timestamptz(3)
+
+  organization         Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  assignee             OrganizationMembership? @relation(fields: [assignedMembershipId, organizationId], references: [id, organizationId], onDelete: Restrict)
+  creator              OrganizationMembership @relation("LeadCreator", fields: [createdByMembershipId, organizationId], references: [id, organizationId], onDelete: Restrict)
+  updater              OrganizationMembership? @relation("LeadUpdater", fields: [updatedByMembershipId, organizationId], references: [id, organizationId], onDelete: Restrict)
+  notes                LeadNote[]
+  events               LeadEvent[]
+
+  @@unique([id, organizationId])
+  @@unique([organizationId, leadNumber])
+  @@index([organizationId, archivedAt, createdAt(sort: Desc)])
+  @@index([organizationId, status, createdAt(sort: Desc)])
+  @@index([organizationId, assignedMembershipId, status])
+  @@index([organizationId, phoneNormalized])
+  @@index([organizationId, emailNormalized])
+  @@map("leads")
+}
+
+model LeadNote {
+  id                String   @id @default(uuid()) @db.Uuid
+  leadId            String   @map("lead_id") @db.Uuid
+  organizationId    String   @map("organization_id") @db.Uuid
+  authorMembershipId String  @map("author_membership_id") @db.Uuid
+  body              String   @db.VarChar(4000)
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  lead   Lead @relation(fields: [leadId, organizationId], references: [id, organizationId], onDelete: Restrict)
+  author OrganizationMembership @relation(fields: [authorMembershipId, organizationId], references: [id, organizationId], onDelete: Restrict)
+
+  @@index([leadId, createdAt(sort: Desc)])
+  @@map("lead_notes")
+}
+
+model LeadEvent {
+  id                String   @id @default(uuid()) @db.Uuid
+  leadId            String   @map("lead_id") @db.Uuid
+  organizationId    String   @map("organization_id") @db.Uuid
+  actorMembershipId String   @map("actor_membership_id") @db.Uuid
+  eventType         String   @map("event_type") @db.VarChar(48)
+  safeMetadata      Json?    @map("safe_metadata")
+  occurredAt        DateTime @default(now()) @map("occurred_at") @db.Timestamptz(3)
+
+  lead Lead @relation(fields: [leadId, organizationId], references: [id, organizationId], onDelete: Restrict)
+  actor OrganizationMembership @relation(fields: [actorMembershipId, organizationId], references: [id, organizationId], onDelete: Restrict)
+
+  @@index([leadId, occurredAt(sort: Desc)])
+  @@index([organizationId, occurredAt(sort: Desc)])
+  @@map("lead_events")
+}

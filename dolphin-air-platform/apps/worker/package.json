@@ -1,0 +1,1 @@
+{"name":"@dolphin/worker","private":true,"scripts":{"dev":"tsx watch src/main.ts","build":"tsc -p tsconfig.json","lint":"eslint .","typecheck":"tsc --noEmit -p tsconfig.json"},"devDependencies":{"@types/node":"^22.10.2","tsx":"^4.19.2","typescript":"^5.7.2"}}

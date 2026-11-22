@@ -1,0 +1,39 @@
+{
+    "name": "@dolphin/crm",
+    "private": true,
+    "type": "module",
+    "scripts": {
+        "dev": "vite --host 0.0.0.0",
+        "build": "tsc -b && vite build --configLoader runner",
+        "build:e2e": "vite build --config vite.e2e.config.ts --configLoader runner --mode e2e",
+        "lint": "eslint .",
+        "typecheck": "tsc -b --pretty false",
+        "test": "vitest run --config vitest.config.ts --configLoader runner",
+        "test:e2e": "node e2e/run-e2e.mjs"
+    },
+    "dependencies": {
+        "@dolphin/ui": "workspace:*",
+        "@tanstack/react-query": "^5.62.8",
+        "firebase": "^12.16.0",
+        "lucide-react": "^0.546.0",
+        "react": "^18.3.1",
+        "react-dom": "^18.3.1",
+        "react-router-dom": "^7.0.2",
+        "zustand": "^5.0.2"
+    },
+    "devDependencies": {
+        "@playwright/test": "^1.65.1",
+        "@tailwindcss/vite": "^4.0.0",
+        "@testing-library/jest-dom": "^8.0.0",
+        "@testing-library/react": "^16.3.3",
+        "@testing-library/user-event": "^14.6.13",
+        "@types/react": "^18.3.12",
+        "@types/react-dom": "^18.3.1",
+        "@vitejs/plugin-react": "^4.3.4",
+        "jsdom": "^31.0.1",
+        "tailwindcss": "^4.0.0",
+        "typescript": "^5.7.2",
+        "vite": "^6.0.1",
+        "vitest": "^5.1.1"
+    }
+}

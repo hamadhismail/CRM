@@ -1,0 +1,14 @@
+node_modules/
+apps/api/src/generated/prisma/
+.pnpm-store/
+.turbo/
+dist/
+build/
+.next/
+coverage/
+.env
+.env.*
+!.env.example
+apps/crm/.playwright/
+apps/crm/playwright-report/
+*.log

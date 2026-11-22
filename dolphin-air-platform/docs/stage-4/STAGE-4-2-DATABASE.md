@@ -1,0 +1,7 @@
+# Stage 4.2 database
+
+`Lead`, `LeadNote` and `LeadEvent` are added to the Prisma schema. Lead events are intended to carry status and assignment history without separate duplicate event tables. Tenant keys on lead, note and event relations use composite foreign keys; lead assignee/creator/updater and event actors reference memberships in the same organization. Status, priority and service are centralized enums. Phone/email are indexed per organization, not globally unique. Lead number is unique within an organization. SQL checks cover nonnegative passengers/budgets, valid budget range and three-letter currency.
+
+`0003_leads_foundation/migration.sql` was generated from the isolated development database and reviewed. The Prisma diff included unrelated identity constraint renames; these were removed. The migration was applied on 2026-11-22 using the configured migrator; Prisma reports the database schema up to date. `leads-runtime-grants.sql` was then applied. The application role has lead SELECT/INSERT/UPDATE, note/event SELECT/INSERT, and no DELETE/TRUNCATE on these tables; note/event UPDATE and migration-history SELECT are denied. The synthetic rollback check inserted a lead, note and event and confirmed that changing its organization to one without the matching creator membership fails. No synthetic rows were retained.
+
+The composite foreign keys enforce matching organization IDs. Active membership and account status still require checks in the service before each write; schema presence alone does not authorize lead access.

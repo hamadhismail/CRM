@@ -1,0 +1,28 @@
+{
+    "name":  "@dolphin/api",
+    "private":  true,
+    "scripts":  {
+                    "dev":  "nest start --watch",
+                    "build":  "nest build",
+                    "lint":  "eslint .",
+                    "typecheck":  "tsc --noEmit",
+                    "test":  "tsx --test test/identity-policy.test.ts test/auth-service.test.ts test/auth-only-emulator.test.ts test/auth-emulator.test.ts test/runtime-database-target.test.ts test/role-scope.policy.test.ts test/role-scope.database.test.ts test/database-identity-sync.test.ts test/leads-gate.test.ts test/authenticated-leads.integration.test.ts",
+                    "db:health":  "node scripts/db-health.mjs",
+                    "sync:role-catalog":  "tsx scripts/sync-role-catalog.ts",
+                    "seed:identity":  "tsx scripts/seed-identity-emulator.ts"
+                },
+    "dependencies":  {
+                         "@nestjs/common":  "^10.4.15",
+                         "@nestjs/config":  "^3.3.0",
+                         "@nestjs/core":  "^10.4.15",
+                         "@nestjs/platform-express":  "^10.4.15",
+                         "@prisma/adapter-pg":  "7.10.1",
+                         "@prisma/client":  "7.10.1",
+                         "class-transformer":  "^0.5.1",
+                         "class-validator":  "^0.14.1",
+                         "firebase-admin":  "^14.2.0",
+                         "pg":  "8.23.1",
+                         "reflect-metadata":  "^0.2.2",
+                         "rxjs":  "^7.8.1"
+                     }
+}
